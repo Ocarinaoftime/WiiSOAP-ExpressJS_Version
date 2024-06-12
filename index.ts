@@ -1,30 +1,16 @@
-import express, { response } from "express";
-import xmlQuery, { XmlNode } from "xml-query";
+var express = require('express');
+//import xmlQuery, { XmlNode } from "xml-query";
 var bodyParser = require('body-parser');
-require('body-parser-xml')(bodyParser);
-var XmlReader = require('xml-reader');
-var xmlparser = require('express-xml-bodyparser');
-import * as wiino from './wiino';
-
-interface Config {
-  Address: string;
-  SQLAddress: string;
-  SQLUser: string;
-  SQLPass: string;
-  SQLDB: string;
-}
-
+var fs = require('fs');
+var https = require('https');
+var privateKey  = fs.readFileSync('key.key', 'utf8');
+var certificate = fs.readFileSync('cert.pem', 'utf8');
+var sslConfig = require('ssl-config')('intermediate');
+var credentials = {key: privateKey, cert: certificate};
+var action: string;
 interface Envelope {
-  'soapenv:Envelope': {
-    '$': {
-      'xmlns:soapenv': string;
-      'xmlns:xsd': string;
-      'xmlns:xsi': string;
-    };
-  };
-  
+  '$': object;
   'soapenv:Body': Body;
-  action: string;
 }
 
 
@@ -42,29 +28,16 @@ interface Response {
   ErrorCode: number;
   ServiceStandbyMode: boolean;
   [key: string]: any;
-  customType: object;
-}
-
-interface KVField {
-  Value: string;
-}
-
-interface Balance {
-  Amount: number;
-  Currency: string;
-}
-
-interface Transactions {
-  TransactionId: string;
-  Date: string;
-  Type: string;
 }
 
 const app = express();
 const port = 3000;
-
-var xml;
-var parsed;
+var httpsServer = https.createServer({
+  key: credentials.key, 
+  cert: credentials.cert,
+  ciphers: "DEFAULT@SECLEVEL=0",
+  secureOptions: sslConfig.minimumTLSVersion
+}, app);
 var ast: any;
 const SharedChallenge = "NintyWhyPls";
 //import { DOMParser, XMLSerializer } from 'xmldom';
@@ -89,17 +62,16 @@ function parseAction(original: string) {
 }
 
 // NewEnvelope returns a new Envelope with proper attributes initialized.
-function NewEnvelope(service: string, action: string): Envelope {
+function NewEnvelope(service: string, action1: string): Envelope {
   // Get a sexy new timestamp to use.
   const timestampNano = Date.now().toString().slice(0, 13);
+  action = action1;
 
   return {
-    'soapenv:Envelope': {
-      '$': {
-        'xmlns:soapenv': 'http://schemas.xmlsoap.org/soap/envelope/',
-        'xmlns:xsd':'http://www.w3.org/2001/XMLSchema',
-        'xmlns:xsi': 'http://www.w3.org/2001/XMLSchema-instance'
-      },
+    '$': {
+      'xmlns:soapenv': 'http://schemas.xmlsoap.org/soap/envelope/',
+      'xmlns:xsd':'http://www.w3.org/2001/XMLSchema',
+      'xmlns:xsi': 'http://www.w3.org/2001/XMLSchema-instance'
     },
     'soapenv:Body': {
       [`${action}Response`]: {
@@ -110,46 +82,45 @@ function NewEnvelope(service: string, action: string): Envelope {
         DeviceId: '',
         MessageId: '',
         ServiceStandbyMode: false,
-        key: {},
-        customType: {},
+        //key: {},
+        //customType: {},
       },
     },
-    action,
   }
 };
 
 // Action returns the action for this service.
 function Action(e: Envelope): string {
-  return e.action;
+  return action;
 }
 
 // Timestamp returns a shared timestamp for this request.
 function Timestamp(e: Envelope): string {
-  return e['soapenv:Body'][`${Action(e)}Response`].TimeStamp;
+  return e['soapenv:Body'][`${action}Response`].TimeStamp;
 }
 
 // DeviceId returns the Device ID for this request.
 function DeviceId(e: Envelope): string {
-  return e['soapenv:Body'][`${Action(e)}Response`].DeviceId as string;
+  return e['soapenv:Body'][`${action}Response`].DeviceId as string;
 }
 
 // ObtainCommon interprets a given node, and updates the envelope with common key values.
 function ObtainCommon(e: Envelope, doc: string | any): [any, null] {
   // These fields are common across all requests.
   var err;
-  e['soapenv:Body'][`${Action(e)}Response`].Version = getKey(doc[0], 'Version')[0];
+  e['soapenv:Body'][`${action}Response`].Version = getKey(doc[0], 'Version')[0];
   err = getKey(doc[0], 'Version')[1];
   //console.log("err ", err)
   if (err !== null) {
      return [err, null]
   }
-  e['soapenv:Body'][`${Action(e)}Response`].DeviceId = getKey(doc[0], 'DeviceId')[0];
+  e['soapenv:Body'][`${action}Response`].DeviceId = getKey(doc[0], 'DeviceId')[0];
   err = getKey(doc[0], 'DeviceId')[1];
   //console.log("err ", err)
   if (err !== null) {
     return [err, null];
   }
-  e['soapenv:Body'][`${Action(e)}Response`].MessageId = getKey(doc[0], 'MessageId')[0];
+  e['soapenv:Body'][`${action}Response`].MessageId = getKey(doc[0], 'MessageId')[0];
   err = getKey(doc[0], 'MessageId')[1];
   //console.log("err ", err)
   if (err !== null) {
@@ -161,19 +132,19 @@ function ObtainCommon(e: Envelope, doc: string | any): [any, null] {
 
 // AddKVNode adds a given key by name to a specified value, such as <key>value</key>.
 function AddKVNode(e: Envelope, key: string, value: string): void {
-  e["soapenv:Body"][`${Action(e)}Response`][key] = value;
+  e["soapenv:Body"][`${action}Response`][key] = value;
 }
 
 // AddCustomType adds a given key by name to a specified structure.
 function AddCustomType(e: Envelope, customType: any): void {
-  e['soapenv:Body'][`${Action(e)}Response`].customType = customType;
+  e['soapenv:Body'][`${action}Response`].customType = customType;
 }
 
 // becomeXML marshals the Envelope object, returning the intended boolean state on success.
 // ..there has to be a better way to do this, TODO.
 function becomeXML(e: Envelope, intendedStatus: boolean): [boolean, string] {
   try {
-    const builder = new Builder();
+    const builder = new Builder({rootName: 'soapenv:Envelope'});
     const contents = builder.buildObject(e);
     //const result = '<?xml version="1.0" encoding="UTF-8"?>\n' + contents;
     return [intendedStatus, contents];
@@ -184,15 +155,15 @@ function becomeXML(e: Envelope, intendedStatus: boolean): [boolean, string] {
 
 }
 function ReturnSuccess(e: Envelope): [boolean, string] {
-  e['soapenv:Body'][`${Action(e)}Response`].ErrorCode = 0;
+  e['soapenv:Body'][`${action}Response`].ErrorCode = 0;
 
   return becomeXML(e, true)
 }
 
 function ReturnError(e: Envelope, errorCode: number, reason: string, err: any): [boolean, string] {
-  e['soapenv:Body'][`${Action(e)}Response`].ErrorCode = errorCode;
+  e['soapenv:Body'][`${action}Response`].ErrorCode = errorCode;
 
-  e['soapenv:Body'][`${Action(e)}Response`].CustomFields = {};
+  e['soapenv:Body'][`${action}Response`].CustomFields = {};
 
   AddKVNode(e, "UserReason", reason);
   AddKVNode(e, "ServerReason", err);
@@ -469,18 +440,18 @@ async function commonHandler(req: any, res: any) {
   console.log("[!] End of " + String(service).toUpperCase() + " Request.\n")
 }
 
-app.get("/", (req, res) => {
+app.get("/", (req: any, res: any) => {
   res.status(404).send("Incorrect URL");
 });
-app.get("/ecs/services/ECommerceSOAP", (req, res) => {
-  res.status(500).send("Can't process this request right now. Try again later.");
+app.get("/ecs/services/ECommerceSOAP", (req: any, res: any) => {
+  res.status(200).send("<h1>ECommerceSOAP</h1><p>Hi there, this is an AXIS service!</p><i>Perhaps there will be a form for invoking the service here...</i>");
 })
-app.get("/ias/services/IdentityAuthenticationSOAP", (req, res) => {
-  res.status(500).send("Can't process this request right now. Try again later.");
+app.get("/ias/services/IdentityAuthenticationSOAP", (req: any, res: any) => {
+  res.status(200).send("<h1>IdentityAuthenticationSOAP</h1><p>Hi there, this is an AXIS service!</p><i>Perhaps there will be a form for invoking the service here...</i>");
 })
 app.post("/ecs/services/ECommerceSOAP", bodyParser.text({type: "*/*"}), commonHandler)
 app.post("/ias/services/IdentityAuthenticationSOAP", bodyParser.text({type: "*/*"}), commonHandler)
-app.post("/", bodyParser.text({type: "*/*"}), (req, res) => {
+app.post("/", bodyParser.text({type: "*/*"}), (req: any, res: any) => {
   //res.send(req.body);
   //const un = XmlReader.parseSync(req.body);
   //const xq = xmlQuery(un);
@@ -490,5 +461,8 @@ app.post("/", bodyParser.text({type: "*/*"}), (req, res) => {
 })
 
 app.listen(port, () => {
-  console.log(`Sandbox listening on port ${port}`);
+  console.log(`HTTP Server listening on port ${port}`);
+});
+httpsServer.listen(443, () => {
+  console.log("HTTPS Server listening on port 443");
 });
