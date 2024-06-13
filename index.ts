@@ -42,7 +42,7 @@ var ast: any;
 const SharedChallenge = "NintyWhyPls";
 //import { DOMParser, XMLSerializer } from 'xmldom';
 
-import { parseStringPromise, Builder } from 'xml2js';
+import {Builder} from 'xml2js';
 
 const namespaceParse = /^urn:(.{3})\.wsapi\.broadon\.com\/(.*)$/;
 
@@ -76,11 +76,11 @@ function NewEnvelope(service: string, action1: string): Envelope {
     'soapenv:Body': {
       [`${action}Response`]: {
         '$': { xmlns: 'urn:' + service + '.wsapi.broadon.com' },
-        TimeStamp: timestampNano,
-        ErrorCode: 0,
         Version: '',
         DeviceId: '',
         MessageId: '',
+        TimeStamp: timestampNano,
+        ErrorCode: 0,
         ServiceStandbyMode: false,
         //key: {},
         //customType: {},
@@ -136,8 +136,8 @@ function AddKVNode(e: Envelope, key: string, value: string): void {
 }
 
 // AddCustomType adds a given key by name to a specified structure.
-function AddCustomType(e: Envelope, customType: any): void {
-  e['soapenv:Body'][`${action}Response`].customType = customType;
+function AddCustomType(e: Envelope, name: string, customType: any): void {
+  e['soapenv:Body'][`${action}Response`][name] = customType;
 }
 
 // becomeXML marshals the Envelope object, returning the intended boolean state on success.
@@ -324,7 +324,7 @@ function ecsHandler(e: Envelope, doc: string | any): [boolean | any, string | an
   switch (Action(e)) {
     case "CheckDeviceStatus":
       console.log("The request is valid! Responding...");
-      AddCustomType(e, {amount: 9999, currency: "POINTS"});
+      AddCustomType(e, "Balance", {amount: 9999, currency: "POINTS"});
       AddKVNode(e, "ForceSyncTime", "0");
       AddKVNode(e, "ExtTicketTime", Timestamp(e));
       AddKVNode(e, "SyncTime", Timestamp(e));
@@ -349,11 +349,11 @@ function ecsHandler(e: Envelope, doc: string | any): [boolean | any, string | an
       // "If you wanna fun time, it's gonna cost ya extra sweetie... ;3"
 
       console.log("The request is valid! Responding...");
-      AddCustomType(e, {
+      AddCustomType(e, "Balance", {
         Amount: 2018,
         Currency: "POINTS",
       });
-      AddCustomType(e, {
+      AddCustomType(e, "Transactions", {
         TransactionId: "00000000",
         Date: Timestamp(e),
         Type: "PURCHGAME",
@@ -375,10 +375,9 @@ function ecsHandler(e: Envelope, doc: string | any): [boolean | any, string | an
 //app.use(bodyParser.text());
 
 async function commonHandler(req: any, res: any) {
-  console.log(ast);
   // Find out what action is sent from the header
   var service = parseAction(String(req.header("SOAPAction")))[0];
-  var action = parseAction(String(req.header("SOAPAction")))[1];
+  action = parseAction(String(req.header("SOAPAction")))[1];
   if (service == "" || action == "") {
     console.error("I can't handle this. Try again later.\n");
     res.status(500).send("I can't handle this. Try again later.\n Can't read SOAPAction header");
@@ -397,6 +396,7 @@ async function commonHandler(req: any, res: any) {
 
   console.log("[!] Incoming " + service.toUpperCase() + " request - handling for " + action)
   var body = req.body;
+  fs.writeFileSync('./reqBodies.txt', `Request body at ${Date.now().toString().slice(0, 13)}:\n${body}`);
   var doc = normalise(service, action, body);
 
   //console.log("doc", doc)
@@ -433,6 +433,7 @@ async function commonHandler(req: any, res: any) {
 		// Write returned with proper Content-Type
 		res.header("Content-Type").set("text/xml; charset=utf-8");
     res.status(200).send(result);
+    fs.writeFileSync('./resBodies.txt', `Response body at ${Date.now().toString().slice(0, 13)}:\n${result}`);
 	} else {
 		console.error(result)
     res.status(500).send("Service handler unsuccessful");

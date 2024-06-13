@@ -3,3 +3,6 @@ node_modules
 *.key
 package.json
 package-lock.json
+*.key
+*.pem
+*.txt
