@@ -1,10 +1,10 @@
-# Node.js Express template
+# WiiSOAP - ExpressJS Edition
 
-This is a Node.js Express project with an HTTP server.
+This is a remake of WiiSOAP from Puppercino, where their repository was made in GoLang, while this one is written in TypeScript.
 
 Add your [configuration](https://codesandbox.io/docs/projects/learn/setting-up/tasks) to optimize it for [CodeSandbox](https://codesandbox.io).
 
-## How does this work?
+## Building from Source
 
 We run `yarn start` to start an HTTP server that runs on http://localhost:8080. You can open new or existing devtools with the + button next to the devtool tabs.
 
